@@ -20,7 +20,7 @@ jobs:
       - run: pip install -r requirements.txt
       - run: |
           START_ANIM=$(( ${{ matrix.chunk }} * 2 ))
-          END_ANIM=$(( START_ANIM + 2 ))
+          END_ANIM=$(( START_ANIM + 1 ))
           CHUNK_ID=$(printf '%02d' ${{ matrix.chunk }})
           manim -qh -n $START_ANIM,$END_ANIM main.py Var1Kinetic --format mp4 -o chunk_${CHUNK_ID}.mp4 || true
       - uses: actions/upload-artifact@v4
