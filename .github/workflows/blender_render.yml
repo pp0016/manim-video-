@@ -12,7 +12,7 @@ on:
       chunk_size:
         description: "Frames per runner chunk"
         required: true
-        default: "30"
+        default: "12"
 
 jobs:
   # -------------------------------------------------------------
@@ -28,7 +28,7 @@ jobs:
         name: Generate Matrix JSON
         env:
           INPUT_TOTAL_FRAMES: ${{ github.event.inputs.total_frames || '120' }}
-          INPUT_CHUNK_SIZE: ${{ github.event.inputs.chunk_size || '30' }}
+          INPUT_CHUNK_SIZE: ${{ github.event.inputs.chunk_size || '12' }}
         run: |
           python3 -c "
           import json, math, os
