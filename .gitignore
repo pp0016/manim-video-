@@ -1,0 +1,37 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest & testing cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
+
+# Render Farm & Build Outputs
+output/
+merged_frames/
+chunks_dir/
+media/
+inputs.txt
+
+# Rendered Video & Media Artifacts
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# Temporary Render & Blender Backups
+*.blend1
+*.blend@
+*.png.tmp
+*.tmp
+
+# Operating System Files
+.DS_Store
+Thumbs.db

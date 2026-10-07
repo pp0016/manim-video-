@@ -1,0 +1,158 @@
+name: Parallel Blender Cloud Render Farm
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      total_frames:
+        description: "Total animation frames (e.g., 120 for 4s @ 30fps)"
+        required: true
+        default: "120"
+      chunk_size:
+        description: "Frames per runner chunk"
+        required: true
+        default: "30"
+
+jobs:
+  # -------------------------------------------------------------
+  # Job 1: Preflight Matrix Planner
+  # -------------------------------------------------------------
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.generate.outputs.matrix }}
+      total_frames: ${{ steps.generate.outputs.total_frames }}
+    steps:
+      - id: generate
+        name: Generate Matrix JSON
+        env:
+          INPUT_TOTAL_FRAMES: ${{ github.event.inputs.total_frames || '120' }}
+          INPUT_CHUNK_SIZE: ${{ github.event.inputs.chunk_size || '30' }}
+        run: |
+          python3 -c "
+          import json, math, os
+          total = int(os.environ.get('INPUT_TOTAL_FRAMES') or '120')
+          chunk_sz = int(os.environ.get('INPUT_CHUNK_SIZE') or '30')
+          chunks = []
+          num_chunks = math.ceil(total / chunk_sz)
+          for i in range(num_chunks):
+              start_frame = i * chunk_sz + 1
+              end_frame = min((i + 1) * chunk_sz, total)
+              chunks.append({'id': f'{i:02d}', 'start': start_frame, 'end': end_frame})
+          matrix_json = json.dumps(chunks)
+          print(f'matrix={matrix_json}')
+          print(f'total_frames={total}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'matrix={matrix_json}\n')
+              f.write(f'total_frames={total}\n')
+          "
+
+  # -------------------------------------------------------------
+  # Job 2: Distributed Parallel Render Workers
+  # -------------------------------------------------------------
+  render_chunk:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        chunk: ${{ fromJson(needs.plan.outputs.matrix) }}
+    env:
+      BLENDER_VERSION: "4.2.3"
+      BLENDER_MAJOR: "4.2"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux Headless Runtime Libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxi6 libxrender1 libxxf86vm1 libxfixes3 libgl1-mesa-glx libglu1-mesa libgl1-mesa-dri xvfb
+
+      - name: Download and Extract Portable Blender LTS
+        run: |
+          mkdir -p $HOME/blender
+          curl -fL "https://download.blender.org/release/Blender${BLENDER_MAJOR}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
+            | tar -xJ --strip-components=1 -C $HOME/blender
+          echo "$HOME/blender" >> $GITHUB_PATH
+
+      - name: Render Chunk ${{ matrix.chunk.id }} (Frames ${{ matrix.chunk.start }} to ${{ matrix.chunk.end }})
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/output"
+          blender -b -P blender/scene_generator.py -o "$GITHUB_WORKSPACE/output/frame_#####" -s ${{ matrix.chunk.start }} -e ${{ matrix.chunk.end }} -a
+
+      - name: Validate Chunk Frame Count
+        run: |
+          EXPECTED=$(( ${{ matrix.chunk.end }} - ${{ matrix.chunk.start }} + 1 ))
+          ACTUAL=$(ls -1 "$GITHUB_WORKSPACE/output"/frame_*.png 2>/dev/null | wc -l)
+          echo "Chunk ${{ matrix.chunk.id }}: Rendered $ACTUAL of $EXPECTED expected frames."
+          if [ "$ACTUAL" -ne "$EXPECTED" ]; then
+            echo "ERROR: Frame count mismatch in chunk ${{ matrix.chunk.id }} (expected $EXPECTED, got $ACTUAL)"
+            exit 1
+          fi
+
+      - name: Upload Chunk Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames-chunk-${{ matrix.chunk.id }}
+          path: output/frame_*.png
+          retention-days: 1
+          compression-level: 0
+
+  # -------------------------------------------------------------
+  # Job 3: FFmpeg Frame Assembler & Video Stitcher
+  # -------------------------------------------------------------
+  stitch:
+    needs: [plan, render_chunk]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download All Frame Chunks
+        uses: actions/download-artifact@v4
+        with:
+          pattern: frames-chunk-*
+          merge-multiple: true
+          path: merged_frames
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Verify Total Frame Count Completeness
+        run: |
+          EXPECTED=${{ needs.plan.outputs.total_frames }}
+          ACTUAL=$(ls -1 merged_frames/frame_*.png 2>/dev/null | wc -l)
+          echo "Frame Verification: Downloaded $ACTUAL frames. Expected: $EXPECTED."
+          if [ "$ACTUAL" -ne "$EXPECTED" ]; then
+            echo "CRITICAL: Missing frames! Render farm incomplete (expected $EXPECTED, found $ACTUAL)."
+            exit 1
+          fi
+
+      - name: Compile Video with FFmpeg Broadcast Settings
+        run: |
+          ffmpeg -y \
+            -framerate 30 \
+            -start_number 1 \
+            -i "merged_frames/frame_%05d.png" \
+            -c:v libx264 \
+            -profile:v high \
+            -level:v 4.2 \
+            -pix_fmt yuv420p \
+            -preset slow \
+            -crf 18 \
+            -movflags +faststart \
+            Final_3D_Typography_Hook.mp4
+
+      - name: Upload Final Video Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Final_3D_Typography_Hook
+          path: Final_3D_Typography_Hook.mp4
+          retention-days: 7
