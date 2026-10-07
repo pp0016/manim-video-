@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        chunk: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+        chunk: [3, 7]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,22 +28,3 @@ jobs:
           name: var1_chunk_${{ matrix.chunk }}
           path: media/videos/**/chunk_*.mp4
           if-no-files-found: ignore
-
-  stitch_var1:
-    needs: render_var1
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with: { path: chunks_dir }
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - run: |
-          > inputs.txt
-          for i in {0..19}; do
-            FILE=$(find chunks_dir/var1_chunk_$i -name "*.mp4" | head -n 1)
-            if [ -n "$FILE" ]; then echo "file '$FILE'" >> inputs.txt; fi
-          done
-          ffmpeg -f concat -safe 0 -i inputs.txt -c copy Full_1Minute_Hook_Var1.mp4
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Full_1Minute_Hook_Var1
-          path: Full_1Minute_Hook_Var1.mp4
